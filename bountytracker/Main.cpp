@@ -51,7 +51,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 	// If we're being loaded from the command line while FLHook is running then
 	// set_scCfgFile will not be empty so load the settings as FLHook only
 	// calls load settings on FLHook startup and .rehash.
-	if(fdwReason == DLL_PROCESS_ATTACH)
+	if (fdwReason == DLL_PROCESS_ATTACH)
 	{
 		if (set_scCfgFile.length()>0)
 			LoadSettings();
@@ -74,6 +74,9 @@ struct BountyTargetInfo {
 	string Cash;
 	string xTimes;
 	string issuer;
+	bool safe;
+	bool active;
+	string lastIssuer;
 };
 BountyTargetInfo BTI;
 static map<wstring, BountyTargetInfo> mapBountyTargets;
@@ -93,35 +96,38 @@ void LoadSettings()
 	if (ini.open(File_FLHook.c_str(), false))
 	{
 		while (ini.read_header())
+		{
+			if (ini.is_header("config"))
 			{
-				if (ini.is_header("config"))
+				while (ini.read_value())
 				{
-					while (ini.read_value())
+					if (ini.is_value("enabled"))
 					{
-						if (ini.is_value("enabled"))
-						{
-							bPluginEnabled = ini.get_value_bool(0);
-						}
-					}				
-				}
-				if (ini.is_header("bounty"))
-				{
-					while (ini.read_value())
-					{
-						if (ini.is_value("hit"))
-						{
-							string setTargetName = ini.get_value_string(0);
-							wstring theTargetName = stows(setTargetName);
-							BTI.Char = ToLower(ini.get_value_string(0));
-							BTI.Cash = ini.get_value_string(1);
-							BTI.xTimes = ini.get_value_string(2);
-							BTI.issuer = ini.get_value_string(3);
-							mapBountyTargets[theTargetName] = BTI;
-							++iLoaded;
-						}
+						bPluginEnabled = ini.get_value_bool(0);
 					}
 				}
 			}
+			if (ini.is_header("bounty"))
+			{
+				while (ini.read_value())
+				{
+					if (ini.is_value("hit"))
+					{
+						string setTargetName = ini.get_value_string(0);
+						wstring theTargetName = ToLower(stows(setTargetName));
+						BTI.Char = ToLower(ini.get_value_string(0));
+						BTI.Cash = ini.get_value_string(1);
+						BTI.xTimes = ini.get_value_string(2);
+						BTI.issuer = ToLower(ini.get_value_string(3));
+						BTI.safe = ini.get_value_bool(4);
+						BTI.active = ini.get_value_bool(5);
+						BTI.lastIssuer = ToLower(ini.get_value_string(6));
+						mapBountyTargets[theTargetName] = BTI;
+						++iLoaded;
+					}
+				}
+			}
+		}
 		ini.close();
 	}
 
@@ -134,10 +140,10 @@ void LoadSettings()
 
 /*updates map and config files of changes to BTI NOTE: not in use
 void UpdateBountyTarget(wstring wscTargetName, BountyTargetInfo BTI) {
-	//first update current map
-	
-	//next shove it into the cfg
-	return;
+//first update current map
+
+//next shove it into the cfg
+return;
 }
 */
 /* copy pasta from playercntl as to provide independance*/
@@ -192,65 +198,80 @@ bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wsc
 	if (wscName == L"")
 	{
 		PrintUserCmdText(iClientID, L"ERR invalid name\n");
-		PrintUserCmdText(iClientID, usage);
+		return false;
+	}
+	if (HkGetAccountByCharname(wscName) == 0)
+	{
+		PrintUserCmdText(iClientID, L"ERR Player does not exist");
+		return true;
+	}
+	if (mapBountyTargets[ToLower(wscName)].active)
+	{
+		PrintUserCmdText(iClientID, L"ERR Player already has an active bounty\n");
+		return true;
+	}
+	if (mapBountyTargets[ToLower(wscName)].safe)
+	{
+		PrintUserCmdText(iClientID, L"ERR Player is protected\n");
+		return true;
+	}
+	if (iClientID == HkGetClientIdFromCharname(stows(mapBountyTargets[ToLower(wscName)].lastIssuer)))//not too sure about this
+	{
+		PrintUserCmdText(iClientID, L"ERR You cannot double a bounty on this player\n");
 		return true;
 	}
 	if (wscCash == L"")
 	{
 		PrintUserCmdText(iClientID, L"ERR invalid cash amount\n");
-		PrintUserCmdText(iClientID, usage);
-		return true;
+		return false;
 	}
 	if (wscxTimes == L"")
 	{
 		PrintUserCmdText(iClientID, L"ERR invalid contract limit\n");
-		PrintUserCmdText(iClientID, usage);
-		return true;
+		return false;
 	}
-	if (HkGetClientIdFromCharname(wscName) == -1)
+	if (stoi(wscCash) < 1000000)
 	{
-		PrintUserCmdText(iClientID, L"ERR Player not logged in");
+		PrintUserCmdText(iClientID, L"ERR bounty cannot be less than 1,000,000 s.c");
 		return true;
 	}
-	if (stoi(wscCash) < 0 )
+	if (stoi(wscxTimes) < 0 || stoi(wscxTimes) > 5)
 	{
-		PrintUserCmdText(iClientID, L"ERR bounty cannot be less than 0");
+		PrintUserCmdText(iClientID, L"ERR bounty contract limit cannot be less than 0 or more than 5");
 		return true;
 	}
-	if (stoi(wscxTimes) < 0 )
-	{
-		PrintUserCmdText(iClientID, L"ERR bounty contract limit cannot be less than 0");
-		return true;
-	}
+	BountyTargetInfo BTIa = mapBountyTargets[ToLower(wscName)];
 	//generate new bounty map values
-	BTI.Char = ToLower(wstos(wscName));
-	BTI.Cash = wstos(wscCash);
-	BTI.xTimes = wstos(wscxTimes);
-	BTI.issuer = wstos((wchar_t*)Players.GetActiveCharacterName(iClientID));
+	BTIa.Char = ToLower(wstos(wscName));
+	BTIa.Cash = wstos(wscCash);
+	BTIa.xTimes = wstos(wscxTimes);
+	BTIa.issuer = ToLower(wstos((wchar_t*)Players.GetActiveCharacterName(iClientID)));
+	BTIa.lastIssuer = BTIa.issuer;
+	BTIa.active = true;
+	///BTIa.safe = false;
 	//check user has enough money for the bounty
 	int iCash;
-	HkGetCash(stows(BTI.issuer), iCash);
-	if (iCash < (stoi(BTI.Cash) * stoi(BTI.xTimes)))
+	HkGetCash(stows(BTIa.issuer), iCash);
+	if (iCash < (stoi(BTIa.Cash) * stoi(BTIa.xTimes)))
 	{
 		PrintUserCmdText(iClientID, L"ERR Not enough cash for bounty.");
 		return true;
 	}
-	HkAddCash((wchar_t*)Players.GetActiveCharacterName(iClientID), 0-(stoi(BTI.Cash) * stoi(BTI.xTimes)));
+	HkAddCash((wchar_t*)Players.GetActiveCharacterName(iClientID), 0 - (stoi(BTIa.Cash) * stoi(BTIa.xTimes)));
 	PrintUserCmdText(iClientID, L"Uploading to Neural Net...");
+	mapBountyTargets[ToLower(wscName)] = BTIa;
 
 	wstring PFwsTargetInfo;
 	PFwsTargetInfo = L"Target: ";
 	PFwsTargetInfo += wscName;
 	PFwsTargetInfo += L" Worth: ";
-	PFwsTargetInfo += stows(BTI.Cash);
+	PFwsTargetInfo += stows(BTIa.Cash);
 	PFwsTargetInfo += L" Contracts Left: ";
-	PFwsTargetInfo += stows(BTI.xTimes);
+	PFwsTargetInfo += stows(BTIa.xTimes);
 	PFwsTargetInfo += L" Issuer: ";
-	PFwsTargetInfo += stows(BTI.issuer);
+	PFwsTargetInfo += stows(BTIa.issuer);
 	PrintUserCmdText(iClientID, PFwsTargetInfo);
 
-	mapBountyTargets[ToLower(wscName)] = BTI;
-	
 	///UpdateBountyTarget(wscName, BTI);//sets the values into the map and update cfg	
 	PrintUserCmdText(iClientID, L"OK");
 	return true;
@@ -265,20 +286,18 @@ bool UserCmd_BountyView(uint iClientID, const wstring &wscCmd, const wstring &ws
 	if (wscName == L"")
 	{
 		PrintUserCmdText(iClientID, L"ERR invalid Parameters\n");
-		PrintUserCmdText(iClientID, usage);
 		return false;
 	}
-	wstring wscTargetName = ToLower(wscName);
-	BountyTargetInfo BTITargetInfo = mapBountyTargets[wscTargetName];
+	BountyTargetInfo BTIv = mapBountyTargets[ToLower(wscName)];
 	wstring PFwsTargetInfo;
 	PFwsTargetInfo = L"Target: ";
-	PFwsTargetInfo += wscTargetName;
+	PFwsTargetInfo += ToLower(wscName);
 	PFwsTargetInfo += L" Worth: ";
-	PFwsTargetInfo += stows(BTITargetInfo.Cash);
+	PFwsTargetInfo += stows(BTIv.Cash);
 	PFwsTargetInfo += L" Contracts Left: ";
-	PFwsTargetInfo += stows(BTITargetInfo.xTimes);
+	PFwsTargetInfo += stows(BTIv.xTimes);
 	PFwsTargetInfo += L" Issuer: ";
-	PFwsTargetInfo += stows(BTITargetInfo.issuer);
+	PFwsTargetInfo += stows(BTIv.issuer);
 	PrintUserCmdText(iClientID, PFwsTargetInfo);
 	PrintUserCmdText(iClientID, L"OK");
 	return true;
@@ -287,6 +306,56 @@ bool UserCmd_BountyHelp(uint iClientID, const wstring &wscCmd, const wstring &ws
 {
 	PrintUserCmdText(iClientID, L"Usage: /bounty add <target> <cash> <xContracts>\n");
 	PrintUserCmdText(iClientID, L"Usage: /bounty view <target>\n");
+	return true;
+}
+bool UserCmd_BountyAddTo(uint iClientID, const wstring &wscCmd, const wstring &wscName, const wstring &wscCash, const wstring &wscParam1, const wchar_t *usage)
+{
+	if (!bPluginEnabled)
+	{
+		PrintUserCmdText(iClientID, L"BountyTracker is disabled.");
+		return true;
+	}
+	if (wscName == L"")
+	{
+		PrintUserCmdText(iClientID, L"ERR invalid name\n");
+		return false;
+	}
+	if (HkGetAccountByCharname(wscName) == 0)
+	{
+		PrintUserCmdText(iClientID, L"ERR Player does not exist");
+		return true;
+	}
+	if (wscCash == L"")
+	{
+		PrintUserCmdText(iClientID, L"ERR invalid cash amount\n");
+		return false;
+	}
+	if (stoi(wscCash) < 1000000)
+	{
+		PrintUserCmdText(iClientID, L"ERR bounty cannot be less than 1,000,000 s.c");
+		return true;
+	}
+	//get bounty 
+	BountyTargetInfo BTIat = mapBountyTargets[ToLower(wscName)];
+	//check if it is active
+	if (!BTIat.active)
+	{
+		PrintUserCmdText(iClientID, L"ERR bounty not currently active");
+		return true;
+	}
+	//check user has enough money for the bounty
+	int iCash;
+	HkGetCash(stows(ToLower(wstos((wchar_t*)Players.GetActiveCharacterName(iClientID)))), iCash);
+	if (iCash < (stoi(wscCash) * stoi(BTIat.xTimes)))
+	{
+		PrintUserCmdText(iClientID, L"ERR Not enough cash for bounty.");
+		return true;
+	}
+	HkAddCash((wchar_t*)Players.GetActiveCharacterName(iClientID), 0 - (stoi(wscCash) * stoi(BTIat.xTimes)));
+	BTIat.Cash = itos(stoi(BTIat.Cash) + stoi(wscCash));//update cash bounty
+	PrintUserCmdText(iClientID, L"Uploading to Neural Net...");
+	mapBountyTargets[ToLower(wscName)] = BTIat;
+	PrintUserCmdText(iClientID, L"OK");
 	return true;
 }
 
@@ -303,7 +372,7 @@ void __stdcall ShipDestroyed(DamageList *_dmg, DWORD *ecx, uint iKill)
 			wstring wscDestroyedName = ToLower((wchar_t*)Players.GetActiveCharacterName(iDestroyedID));
 			//check if they have a bounty
 			BountyTargetInfo BTId = mapBountyTargets[wscDestroyedName];
-			if (BTId.Char == wstos(wscDestroyedName) && stoi(BTId.xTimes) > 0)
+			if (BTId.Char == wstos(wscDestroyedName) && stoi(BTId.xTimes) > 0 && BTId.active)
 			{
 				// calls the killer the last one to damage the victim
 				DamageList dmg;
@@ -322,14 +391,32 @@ void __stdcall ShipDestroyed(DamageList *_dmg, DWORD *ecx, uint iKill)
 					///ConPrint(L"nevermind, ai got him");
 					return;
 				}
-
+				if (iKillerID == iDestroyedID)
+				{
+					///ConPrint(L"killer and victim are the same");
+					return;
+				}
+				if (ToLower(wscKillerName) == stows(BTId.issuer))
+				{
+					///ConPrint(L"killer was the issuer of the bounty");
+					return;
+				}
 				// -1 to contracts left
 				BTId.xTimes = itos(stoi(BTId.xTimes) - 1);
+				if (stoi(BTId.xTimes) == 0)
+				{
+					//bounty has been fullfilled, clear all dataa
+					BTId.active = false;
+					BTId.Cash = "0";
+					BTId.safe = true;
+					BTId.xTimes = "0";
+					BTId.issuer = "n/a";
+				}
 
 				//upload into neural net
 				mapBountyTargets[wscDestroyedName] = BTId;
 				///UpdateBountyTarget(wscDestroyedName, BTId);
-
+				
 				//Print Friendly Wide String TargetInfo
 				wstring PFwsTargetInfo;
 				PFwsTargetInfo = L"Target: ";
@@ -455,7 +542,7 @@ EXPORT PLUGIN_INFO* Get_PluginInfo()
 	p_PI->bMayPause = true;
 	p_PI->bMayUnload = true;
 	p_PI->ePluginReturnCode = &returncode;
-	
+
 	p_PI->lstHooks.push_back(PLUGIN_HOOKINFO((FARPROC*)&LoadSettings, PLUGIN_LoadSettings, 0));
 	p_PI->lstHooks.push_back(PLUGIN_HOOKINFO((FARPROC*)&ClearClientInfo, PLUGIN_ClearClientInfo, 0));
 	p_PI->lstHooks.push_back(PLUGIN_HOOKINFO((FARPROC*)&UserCmd_Process, PLUGIN_UserCmd_Process, 0));

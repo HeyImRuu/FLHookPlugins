@@ -106,9 +106,6 @@ copy /Y $(OutDir)$(TargetName).pdb  ..\..\bin-vc14\flhook_plugins\
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Main.cpp" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="Main.h" />
   </ItemGroup>
   <ItemGroup>
@@ -120,6 +117,9 @@ copy /Y $(OutDir)$(TargetName).pdb  ..\..\bin-vc14\flhook_plugins\
       <Project>{81d33b95-1ddd-4f58-a24c-e2ec4a143dd0}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
