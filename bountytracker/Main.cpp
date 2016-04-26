@@ -188,13 +188,23 @@ bool MailSend(const wstring &wscCharname, const string &scExtension, const wstri
 	return true;
 }
 
-bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wscName, const wstring &wscCash, const wstring &wscxTimes, const wchar_t *usage)
+bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wscParam, const wchar_t *usage)
 {
 	if (!bPluginEnabled)
 	{
 		PrintUserCmdText(iClientID, L"BountyTracker is disabled.");
 		return true;
 	}
+
+	// Get the parameters from the user command.
+	wstring wscName = GetParam(wscParam, L' ', 0);
+	wstring wscCash = GetParam(wscParam, L' ', 1);
+	wstring wscxTimes = GetParam(wscParam, L' ', 2);
+	wscCash = ReplaceStr(wscCash, L".", L"");
+	wscCash = ReplaceStr(wscCash, L",", L"");
+	wscCash = ReplaceStr(wscCash, L"$", L"");
+	wscCash = ReplaceStr(wscCash, L"e6", L"000000");//because scientific notation is cool
+
 	if (wscName == L"")
 	{
 		PrintUserCmdText(iClientID, L"ERR invalid name\n");
@@ -276,17 +286,28 @@ bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wsc
 	PrintUserCmdText(iClientID, L"OK");
 	return true;
 }
-bool UserCmd_BountyView(uint iClientID, const wstring &wscCmd, const wstring &wscName, const wstring &wscParam2, const wstring &wscParam3, const wchar_t *usage)
+bool UserCmd_BountyView(uint iClientID, const wstring &wscCmd, const wstring &wscParam, const wchar_t *usage)
 {
 	if (!bPluginEnabled)
 	{
 		PrintUserCmdText(iClientID, L"BountyTracker is disabled.");
 		return true;
 	}
+
+	// Get the parameters from the user command.
+	wstring wscName = GetParam(wscParam, L' ', 0);
+	wstring wscCash = GetParam(wscParam, L' ', 1);
+	wstring wscxTimes = GetParam(wscParam, L' ', 2);
+
 	if (wscName == L"")
 	{
 		PrintUserCmdText(iClientID, L"ERR invalid Parameters\n");
 		return false;
+	}
+	if (HkGetAccountByCharname(wscName) == 0)
+	{
+		PrintUserCmdText(iClientID, L"ERR Player does not exist");
+		return true;
 	}
 	BountyTargetInfo BTIv = mapBountyTargets[ToLower(wscName)];
 	wstring PFwsTargetInfo;
@@ -302,20 +323,30 @@ bool UserCmd_BountyView(uint iClientID, const wstring &wscCmd, const wstring &ws
 	PrintUserCmdText(iClientID, L"OK");
 	return true;
 }
-bool UserCmd_BountyHelp(uint iClientID, const wstring &wscCmd, const wstring &wscName, const wstring &wscCash, const wstring &wscxTimes, const wchar_t *usage)
+bool UserCmd_BountyHelp(uint iClientID, const wstring &wscCmd, const wstring &wscParam, const wchar_t *usage)
 {
 	PrintUserCmdText(iClientID, L"Usage: /bounty add <target> <cash> <xContracts>\n");
 	PrintUserCmdText(iClientID, L"Usage: /bounty addto <target> <cash>\n");
 	PrintUserCmdText(iClientID, L"Usage: /bounty view <target>\n");
 	return true;
 }
-bool UserCmd_BountyAddTo(uint iClientID, const wstring &wscCmd, const wstring &wscName, const wstring &wscCash, const wstring &wscParam1, const wchar_t *usage)
+bool UserCmd_BountyAddTo(uint iClientID, const wstring &wscCmd, const wstring &wscParam, const wchar_t *usage)
 {
 	if (!bPluginEnabled)
 	{
 		PrintUserCmdText(iClientID, L"BountyTracker is disabled.");
 		return true;
 	}
+
+	// Get the parameters from the user command.
+	wstring wscName = GetParam(wscParam, L' ', 0);
+	wstring wscCash = GetParam(wscParam, L' ', 1);
+	wstring wscxTimes = GetParam(wscParam, L' ', 2);
+	wscCash = ReplaceStr(wscCash, L".", L"");
+	wscCash = ReplaceStr(wscCash, L",", L"");
+	wscCash = ReplaceStr(wscCash, L"$", L"");
+	wscCash = ReplaceStr(wscCash, L"e6", L"000000");
+
 	if (wscName == L"")
 	{
 		PrintUserCmdText(iClientID, L"ERR invalid name\n");
@@ -468,7 +499,7 @@ void ClearClientInfo(uint iClientID)
 //Client command processing
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-typedef bool(*_UserCmdProc)(uint, const wstring &, const wstring &, const wstring &, const wstring &, const wchar_t*);
+typedef bool(*_UserCmdProc)(uint, const wstring &, const wstring &, const wchar_t*);
 
 struct USERCMD
 {
@@ -506,16 +537,15 @@ bool UserCmd_Process(uint iClientID, const wstring &wscCmd)
 			// Extract the parameters string from the chat string. It should
 			// be immediately after the command and a space.
 			wstring wscParam = L"";
-			std::vector<std::wstring> tok;
 			if (wscCmd.length() > wcslen(UserCmds[i].wszCmd))
 			{
 				if (wscCmd[wcslen(UserCmds[i].wszCmd)] != ' ')
 					continue;
 				wscParam = wscCmd.substr(wcslen(UserCmds[i].wszCmd) + 1);
-				split(tok, wscParam, boost::is_any_of(L" "));
 			}
+
 			// Dispatch the command to the appropriate processing function.
-			if (UserCmds[i].proc(iClientID, wscCmd, tok[0], tok[1], tok[2], UserCmds[i].usage))
+			if (UserCmds[i].proc(iClientID, wscCmd, wscParam, UserCmds[i].usage))
 			{
 				// We handled the command tell FL hook to stop processing this
 				// chat string.
