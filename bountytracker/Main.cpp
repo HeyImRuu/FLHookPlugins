@@ -305,6 +305,7 @@ bool UserCmd_BountyView(uint iClientID, const wstring &wscCmd, const wstring &ws
 bool UserCmd_BountyHelp(uint iClientID, const wstring &wscCmd, const wstring &wscName, const wstring &wscCash, const wstring &wscxTimes, const wchar_t *usage)
 {
 	PrintUserCmdText(iClientID, L"Usage: /bounty add <target> <cash> <xContracts>\n");
+	PrintUserCmdText(iClientID, L"Usage: /bounty addto <target> <cash>\n");
 	PrintUserCmdText(iClientID, L"Usage: /bounty view <target>\n");
 	return true;
 }
@@ -437,7 +438,7 @@ void __stdcall ShipDestroyed(DamageList *_dmg, DWORD *ecx, uint iKill)
 				MailSend(stows(BTId.issuer), MSG_LOG, IssuerMailMsg);
 				PrintUserCmdText(iKillerID, L"Saving record...");
 				wstring KillerMailMsg = L"Bounty Alert: " + wscKillerName + L" Has collected a bounty on " + wscDestroyedName + L". " + stows(BTId.xTimes) + L" Contracts remaining.";
-				MailSend(stows(BTId.issuer), MSG_LOG, KillerMailMsg);
+				MailSend(wscKillerName, MSG_LOG, KillerMailMsg);
 				PrintUserCmdText(iKillerID, L"OK");
 				return;
 			}
@@ -479,6 +480,7 @@ struct USERCMD
 USERCMD UserCmds[] =
 {
 	{ L"/bounty add", UserCmd_BountyAdd, L"Usage: /bounty add <target> <cash> <xtimes>" },
+	{ L"/bounty addto", UserCmd_BountyAddTo, L"Usage: /bounty addto <target> <cash>" },
 	{ L"/bounty view", UserCmd_BountyView, L"Usage: /bounty view <target>" },
 	{ L"/bounty help", UserCmd_BountyHelp, L"Usage: /bounty help" },
 };
