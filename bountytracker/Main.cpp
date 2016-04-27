@@ -18,6 +18,7 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include <windows.h>
+#include <sstream>
 #include <stdio.h>
 #include <string>
 #include <time.h>
@@ -29,6 +30,7 @@
 #include <FLHook.h>
 #include <plugin.h>
 #include <PluginUtilities.h>
+#include <fstream>
 #include "Main.h"
 #include <boost/algorithm/string.hpp>
 
@@ -37,8 +39,10 @@
 static int set_iPluginDebug = 0;// 0 = no debug | 1 = all debug
 static string MSG_LOG = "-mail.ini";
 static const int MAX_MAIL_MSGS = 40;
+static const int MAX_BOUNTY_SAVES = 200;
 bool set_bLocalTime = false;
 bool bPluginEnabled = true;
+string rValue;
 
 /// A return code to indicate to FLHook if we want the hook processing to continue.
 PLUGIN_RETURNCODE returncode;
@@ -81,6 +85,71 @@ struct BountyTargetInfo {
 BountyTargetInfo BTI;
 static map<wstring, BountyTargetInfo> mapBountyTargets;
 
+
+//FML
+void expand(int value)
+{
+	const char * const ones[20] = { "zero", "one", "two", "three","four","five","six","seven",
+		"eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen",
+		"eighteen","nineteen" };
+	const char * const tens[10] = { "", "ten", "twenty", "thirty","forty","fifty","sixty","seventy",
+		"eighty","ninety" };
+
+	if (value<0)
+	{
+		return;
+	}
+	else if (value >= 1000)
+	{
+		expand(value / 1000);
+		rValue += " thousand";
+		if (value % 1000)
+		{
+			if (value % 1000 < 100)
+			{
+				rValue += "";
+			}
+			rValue += " ";
+			expand(value % 1000);
+		}
+	}
+	else if (value >= 100)
+	{
+		expand(value / 100);
+		rValue += " hundred";
+		if (value % 100)
+		{
+			rValue += " and ";
+			expand(value % 100);
+		}
+	}
+	else if (value >= 20)
+	{
+		rValue += tens[value / 10];
+		if (value % 10)
+		{
+			rValue += " ";
+			expand(value % 10);
+		}
+	}
+	else
+	{
+		rValue += ones[value];
+	}
+	return;
+}
+
+
+
+
+
+
+
+
+
+
+
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Loading Settings
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -111,19 +180,27 @@ void LoadSettings()
 			{
 				while (ini.read_value())
 				{
-					if (ini.is_value("hit"))
+					for (int i = 1; i < MAX_BOUNTY_SAVES+1; i++)
 					{
-						string setTargetName = ini.get_value_string(0);
-						wstring theTargetName = ToLower(stows(setTargetName));
-						BTI.Char = ToLower(ini.get_value_string(0));
-						BTI.Cash = ini.get_value_string(1);
-						BTI.xTimes = ini.get_value_string(2);
-						BTI.issuer = ToLower(ini.get_value_string(3));
-						BTI.safe = ini.get_value_bool(4);
-						BTI.active = ini.get_value_bool(5);
-						BTI.lastIssuer = ToLower(ini.get_value_string(6));
-						mapBountyTargets[theTargetName] = BTI;
-						++iLoaded;
+						expand(i);
+						ConPrint(L"looping " + stows(itos(i)) + L" ");
+						if (ini.is_value("hit"))//will not match unless this value is "hit" and whatever the key in the cfg is doesnt matter. (this should not happen, kinda defeats the purpose of matching keys). if this value is anything but "hit" it will not match the key in cfg no matter what (even if they are exactly the same). what the fuck is this bullshit?
+						{
+							//rValue.c_str()
+							//itos(i).c_str()
+							ConPrint(L"found value in loop");
+							string setTargetName = ini.get_value_string(0);
+							wstring theTargetName = ToLower(stows(setTargetName));
+							BTI.Char = ToLower(ini.get_value_string(0));
+							BTI.Cash = ini.get_value_string(1);
+							BTI.xTimes = ini.get_value_string(2);
+							BTI.issuer = ToLower(ini.get_value_string(3));
+							BTI.safe = ini.get_value_bool(4);
+							BTI.active = ini.get_value_bool(5);
+							BTI.lastIssuer = ToLower(ini.get_value_string(6));
+							mapBountyTargets[theTargetName] = BTI;
+							++iLoaded;
+						}
 					}
 				}
 			}
@@ -137,15 +214,95 @@ void LoadSettings()
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Functions
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-/*updates map and config files of changes to BTI NOTE: not in use
-void UpdateBountyTarget(wstring wscTargetName, BountyTargetInfo BTI) {
-//first update current map
-
-//next shove it into the cfg
-return;
+//return values: true = successful save. false = err in save.
+bool updateMapInConfig(string scName, string scCash, string scxTimes, string scIssuer, bool bSafe, bool bActive, string scLastIssuer)
+{
+	string Config_File = "..\\exe\\flhook_plugins\\bountytracker.cfg";
+	
+	//we use an ini reader, like loading the cfg, to iterate and find the correct bounty.
+	INI_Reader ini;
+	if (ini.open(Config_File.c_str(), false))
+	{
+		while (ini.read_header())
+		{
+			if (ini.is_header("bounty"))
+			{
+				while (ini.read_value())
+				{
+					for (int i = MAX_BOUNTY_SAVES; i > 0; i--)
+					{
+						expand(i);
+						if (ini.is_value(rValue.c_str()))
+						{
+							if (ini.get_value_string(0) == ToLower(scName))
+							{
+								//matched cfg value
+								BTI.Char = ToLower(scName);
+								BTI.Cash = scCash;
+								BTI.xTimes = scxTimes;
+								BTI.issuer = scIssuer;
+								string sSafe;
+								string sActive;
+								if (bSafe)
+								{
+									sSafe = "true";
+								}if (!bSafe)
+								{
+									sSafe = "false";
+								}if (bActive)
+								{
+									sActive = "true";
+								}if (!bActive)
+								{
+									sActive = "true";
+								}
+								BTI.lastIssuer = scLastIssuer;
+								IniWriteW(Config_File, "bounty", rValue, stows(BTI.Char) + L"," + stows(BTI.Cash) + L"," + stows(BTI.xTimes) + L"," + stows(BTI.issuer) + L"," + stows(sSafe) + L"," + stows(sActive) + L"," + stows(BTI.lastIssuer));
+								ini.close();
+								return true;
+							}
+						}
+					}
+					
+				}
+			}
+		}
+		ini.close();
+	}
+	return false;
 }
-*/
+bool saveBountyToCfg(string scName, string scCash, string scxTimes, string scIssuer, bool bSafe, bool bActive, string scLastIssuer)
+{
+	string Config_File = "..\\exe\\flhook_plugins\\bountytracker.cfg";
+	wstring wscSafe;
+	wstring wscActive;
+	if (bSafe)
+	{
+		wscSafe = L"true";
+	}if (!bSafe)
+	{
+		wscSafe = L"false";
+	}if (bActive)
+	{
+		wscActive = L"true";
+	}if (!bActive)
+	{
+		wscActive = L"true";
+	}
+	wstring wscbtString = stows(scName) + L"," + +L"," + stows(scCash) + L"," + stows(scxTimes) + L"," + stows(scIssuer) + L"," + wscSafe + L"," + wscActive + L"," + stows(scLastIssuer);
+	// Move all mail up one slot starting at the end. We automatically
+	// discard the oldest messages.
+	for (int ibtSlot = MAX_BOUNTY_SAVES - 1; ibtSlot>0; ibtSlot--)
+	{
+		expand(ibtSlot);
+		wstring wscTmpBt = IniGetWS(Config_File, "bounty", rValue, L"");
+		expand(ibtSlot + 1);
+		IniWriteW(Config_File, "bounty", rValue, wscTmpBt);
+	}
+	// Write message into the slot
+	IniWriteW(Config_File, "bounty", "one", wscbtString);
+	return true;
+}
 /* copy pasta from playercntl as to provide independance*/
 string GetUserFilePath(const wstring &wscCharname, const string &scExtension)
 {
@@ -205,6 +362,8 @@ bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wsc
 	wscCash = ReplaceStr(wscCash, L"$", L"");
 	wscCash = ReplaceStr(wscCash, L"e6", L"000000");//because scientific notation is cool
 
+	//you are not allowed to create a bounty. ERR rank too low (note, find out what a good rank should be to have access to this. no fresh chars can
+	//create bounties. this way we can protect against creating random fresh accs, tranferring cash, and setting copious amounts of bounties.
 	if (wscName == L"")
 	{
 		PrintUserCmdText(iClientID, L"ERR invalid name\n");
@@ -282,7 +441,14 @@ bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wsc
 	PFwsTargetInfo += stows(BTIa.issuer);
 	PrintUserCmdText(iClientID, PFwsTargetInfo);
 
-	///UpdateBountyTarget(wscName, BTI);//sets the values into the map and update cfg	
+	if (saveBountyToCfg(BTIa.Cash, BTIa.Cash, BTIa.xTimes, BTIa.issuer, BTIa.safe, BTIa.active, BTIa.lastIssuer))
+	{
+		ConPrint(L"cfg saved\n");
+	}
+	else
+	{
+		ConPrint(L"Err saving to cfg\n");
+	}
 	PrintUserCmdText(iClientID, L"OK");
 	return true;
 }
