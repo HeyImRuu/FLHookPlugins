@@ -42,7 +42,6 @@ static const int MAX_MAIL_MSGS = 40;
 static const int MAX_BOUNTY_SAVES = 200;
 bool set_bLocalTime = false;
 bool bPluginEnabled = true;
-string rValue;
 
 /// A return code to indicate to FLHook if we want the hook processing to continue.
 PLUGIN_RETURNCODE returncode;
@@ -84,72 +83,6 @@ struct BountyTargetInfo {
 };
 BountyTargetInfo BTI;
 static map<wstring, BountyTargetInfo> mapBountyTargets;
-
-
-//FML
-void expand(int value)
-{
-	const char * const ones[20] = { "zero", "one", "two", "three","four","five","six","seven",
-		"eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen",
-		"eighteen","nineteen" };
-	const char * const tens[10] = { "", "ten", "twenty", "thirty","forty","fifty","sixty","seventy",
-		"eighty","ninety" };
-
-	if (value<0)
-	{
-		return;
-	}
-	else if (value >= 1000)
-	{
-		expand(value / 1000);
-		rValue += " thousand";
-		if (value % 1000)
-		{
-			if (value % 1000 < 100)
-			{
-				rValue += "";
-			}
-			rValue += " ";
-			expand(value % 1000);
-		}
-	}
-	else if (value >= 100)
-	{
-		expand(value / 100);
-		rValue += " hundred";
-		if (value % 100)
-		{
-			rValue += " and ";
-			expand(value % 100);
-		}
-	}
-	else if (value >= 20)
-	{
-		rValue += tens[value / 10];
-		if (value % 10)
-		{
-			rValue += " ";
-			expand(value % 10);
-		}
-	}
-	else
-	{
-		rValue += ones[value];
-	}
-	return;
-}
-
-
-
-
-
-
-
-
-
-
-
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Loading Settings
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -159,6 +92,7 @@ void LoadSettings()
 	returncode = DEFAULT_RETURNCODE;
 
 	string File_FLHook = "..\\exe\\flhook_plugins\\bountytracker.cfg";
+	string File_FLHook_bounties = "..\\exe\\flhook_plugins\\bountytracker.bounties.cfg";
 	int iLoaded = 0;
 
 	INI_Reader ini;
@@ -176,31 +110,29 @@ void LoadSettings()
 					}
 				}
 			}
+		}ini.close();
+	}
+	if(ini.open(File_FLHook_bounties.c_str(), false))
+	{
+		while (ini.read_header())
+		{
 			if (ini.is_header("bounty"))
 			{
 				while (ini.read_value())
 				{
-					for (int i = 1; i < MAX_BOUNTY_SAVES+1; i++)
+					if (ini.is_value("hit"))
 					{
-						expand(i);
-						ConPrint(L"looping " + stows(itos(i)) + L" ");
-						if (ini.is_value("hit"))//will not match unless this value is "hit" and whatever the key in the cfg is doesnt matter. (this should not happen, kinda defeats the purpose of matching keys). if this value is anything but "hit" it will not match the key in cfg no matter what (even if they are exactly the same). what the fuck is this bullshit?
-						{
-							//rValue.c_str()
-							//itos(i).c_str()
-							ConPrint(L"found value in loop");
-							string setTargetName = ini.get_value_string(0);
-							wstring theTargetName = ToLower(stows(setTargetName));
-							BTI.Char = ToLower(ini.get_value_string(0));
-							BTI.Cash = ini.get_value_string(1);
-							BTI.xTimes = ini.get_value_string(2);
-							BTI.issuer = ToLower(ini.get_value_string(3));
-							BTI.safe = ini.get_value_bool(4);
-							BTI.active = ini.get_value_bool(5);
-							BTI.lastIssuer = ToLower(ini.get_value_string(6));
-							mapBountyTargets[theTargetName] = BTI;
-							++iLoaded;
-						}
+						string setTargetName = ini.get_value_string(0);
+						wstring theTargetName = ToLower(stows(setTargetName));
+						BTI.Char = ToLower(ini.get_value_string(0));
+						BTI.Cash = ini.get_value_string(1);
+						BTI.xTimes = ini.get_value_string(2);
+						BTI.issuer = ToLower(ini.get_value_string(3));
+						BTI.safe = ini.get_value_bool(4);
+						BTI.active = ini.get_value_bool(5);
+						BTI.lastIssuer = ToLower(ini.get_value_string(6));
+						mapBountyTargets[theTargetName] = BTI;
+						++iLoaded;
 					}
 				}
 			}
@@ -214,95 +146,98 @@ void LoadSettings()
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Functions
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//return values: true = successful save. false = err in save.
-bool updateMapInConfig(string scName, string scCash, string scxTimes, string scIssuer, bool bSafe, bool bActive, string scLastIssuer)
+//deletes a bounty from the cfg
+bool deleteBountyCfg(BountyTargetInfo BTI)
 {
-	string Config_File = "..\\exe\\flhook_plugins\\bountytracker.cfg";
-	
-	//we use an ini reader, like loading the cfg, to iterate and find the correct bounty.
-	INI_Reader ini;
-	if (ini.open(Config_File.c_str(), false))
+	string sSafe;
+	string sActive;
+	string File_FLHook_tmp = "..\\exe\\flhook_plugins\\bountytracker.bounties.cfg";
+	ifstream tmpCfg(File_FLHook_tmp);
+	vector<string> file;
+	string temp;//buffer for getline()
+	if (tmpCfg.is_open())
 	{
-		while (ini.read_header())
+		return false;
+	}
+	while (!tmpCfg.eof())
+	{
+		getline(tmpCfg, temp);
+		file.push_back(temp);
+	}
+	// done reading file
+	tmpCfg.close();
+
+	if (BTI.safe)
+	{
+		sSafe = "true";
+	}
+	if (!BTI.safe)
+	{
+		sSafe = "false";
+	}
+	if (BTI.active)
+	{
+		sActive = "true";
+	}
+	if (!BTI.active)
+	{
+		sActive = "false";
+	}
+
+
+	string item = "hit = " + BTI.Char + "," + BTI.Cash + "," + BTI.xTimes + "," + BTI.issuer + "," + sSafe + "," + sActive + BTI.lastIssuer;//find this
+	for (int i = 0; i < (int)file.size(); ++i)
+	{
+		if (file[i].substr(0, item.length()) == item)
 		{
-			if (ini.is_header("bounty"))
-			{
-				while (ini.read_value())
-				{
-					for (int i = MAX_BOUNTY_SAVES; i > 0; i--)
-					{
-						expand(i);
-						if (ini.is_value(rValue.c_str()))
-						{
-							if (ini.get_value_string(0) == ToLower(scName))
-							{
-								//matched cfg value
-								BTI.Char = ToLower(scName);
-								BTI.Cash = scCash;
-								BTI.xTimes = scxTimes;
-								BTI.issuer = scIssuer;
-								string sSafe;
-								string sActive;
-								if (bSafe)
-								{
-									sSafe = "true";
-								}if (!bSafe)
-								{
-									sSafe = "false";
-								}if (bActive)
-								{
-									sActive = "true";
-								}if (!bActive)
-								{
-									sActive = "true";
-								}
-								BTI.lastIssuer = scLastIssuer;
-								IniWriteW(Config_File, "bounty", rValue, stows(BTI.Char) + L"," + stows(BTI.Cash) + L"," + stows(BTI.xTimes) + L"," + stows(BTI.issuer) + L"," + stows(sSafe) + L"," + stows(sActive) + L"," + stows(BTI.lastIssuer));
-								ini.close();
-								return true;
-							}
-						}
-					}
-					
-				}
-			}
+
+			file.erase(file.begin() + i);
+			i = 0; // Reset search
 		}
-		ini.close();
 	}
-	return false;
-}
-bool saveBountyToCfg(string scName, string scCash, string scxTimes, string scIssuer, bool bSafe, bool bActive, string scLastIssuer)
-{
-	string Config_File = "..\\exe\\flhook_plugins\\bountytracker.cfg";
-	wstring wscSafe;
-	wstring wscActive;
-	if (bSafe)
+	ofstream out(File_FLHook_tmp, ios::out | ios::trunc);
+
+	for (vector<string>::const_iterator i = file.begin(); i != file.end(); ++i)
 	{
-		wscSafe = L"true";
-	}if (!bSafe)
-	{
-		wscSafe = L"false";
-	}if (bActive)
-	{
-		wscActive = L"true";
-	}if (!bActive)
-	{
-		wscActive = L"true";
+		out << *i << endl;
 	}
-	wstring wscbtString = stows(scName) + L"," + +L"," + stows(scCash) + L"," + stows(scxTimes) + L"," + stows(scIssuer) + L"," + wscSafe + L"," + wscActive + L"," + stows(scLastIssuer);
-	// Move all mail up one slot starting at the end. We automatically
-	// discard the oldest messages.
-	for (int ibtSlot = MAX_BOUNTY_SAVES - 1; ibtSlot>0; ibtSlot--)
-	{
-		expand(ibtSlot);
-		wstring wscTmpBt = IniGetWS(Config_File, "bounty", rValue, L"");
-		expand(ibtSlot + 1);
-		IniWriteW(Config_File, "bounty", rValue, wscTmpBt);
-	}
-	// Write message into the slot
-	IniWriteW(Config_File, "bounty", "one", wscbtString);
+	out.close();
+
 	return true;
 }
+//only used when server is able to handle the file write lag
+bool appendBountyCfg(BountyTargetInfo BTI)
+{
+	string sSafe;
+	string sActive;
+	string File_FLHook_tmp = "..\\exe\\flhook_plugins\\bountytracker.bounties.cfg";
+	ofstream tmpCfg;
+	tmpCfg.open(File_FLHook_tmp, ios::out | ios::app);
+	if (!tmpCfg.is_open())
+	{
+		return false;
+	}
+	if (BTI.safe)
+	{
+		sSafe = "true";
+	}
+	if (!BTI.safe)
+	{
+		sSafe = "false";
+	}
+	if (BTI.active)
+	{
+		sActive = "true";
+	}
+	if (!BTI.active)
+	{
+		sActive = "false";
+	}
+	tmpCfg << endl << "hit = " << BTI.Char << "," << BTI.Cash << "," << BTI.xTimes << "," << BTI.issuer << "," << sSafe << "," << sActive << "," << BTI.lastIssuer << endl;
+	tmpCfg.close();
+	return true;
+}
+
 /* copy pasta from playercntl as to provide independance*/
 string GetUserFilePath(const wstring &wscCharname, const string &scExtension)
 {
@@ -441,7 +376,7 @@ bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wsc
 	PFwsTargetInfo += stows(BTIa.issuer);
 	PrintUserCmdText(iClientID, PFwsTargetInfo);
 
-	if (saveBountyToCfg(BTIa.Cash, BTIa.Cash, BTIa.xTimes, BTIa.issuer, BTIa.safe, BTIa.active, BTIa.lastIssuer))
+	if (appendBountyCfg(BTIa))
 	{
 		ConPrint(L"cfg saved\n");
 	}
@@ -553,6 +488,22 @@ bool UserCmd_BountyAddTo(uint iClientID, const wstring &wscCmd, const wstring &w
 	BTIat.Cash = itos(stoi(BTIat.Cash) + stoi(wscCash));//update cash bounty
 	PrintUserCmdText(iClientID, L"Uploading to Neural Net...");
 	mapBountyTargets[ToLower(wscName)] = BTIat;
+	if (deleteBountyCfg(BTIat))
+	{
+		ConPrint(L"bounty removed from cfg\n");
+	}
+	else
+	{
+		ConPrint(L"Err removing from cfg\n");
+	}
+	if (appendBountyCfg(BTIat))
+	{
+		ConPrint(L"cfg saved\n");
+	}
+	else
+	{
+		ConPrint(L"Err saving to cfg\n");
+	}
 	PrintUserCmdText(iClientID, L"OK");
 	return true;
 }
@@ -572,6 +523,14 @@ void __stdcall ShipDestroyed(DamageList *_dmg, DWORD *ecx, uint iKill)
 			BountyTargetInfo BTId = mapBountyTargets[wscDestroyedName];
 			if (BTId.Char == wstos(wscDestroyedName) && stoi(BTId.xTimes) > 0 && BTId.active)
 			{
+				if (deleteBountyCfg(BTId))
+				{
+					ConPrint(L"bounty removed from cfg\n");
+				}
+				else
+				{
+					ConPrint(L"Err removing from cfg\n");
+				}
 				// calls the killer the last one to damage the victim
 				DamageList dmg;
 				try { dmg = *_dmg; }
@@ -613,6 +572,14 @@ void __stdcall ShipDestroyed(DamageList *_dmg, DWORD *ecx, uint iKill)
 
 				//upload into neural net
 				mapBountyTargets[wscDestroyedName] = BTId;
+				if (appendBountyCfg(BTId))
+				{
+					ConPrint(L"cfg saved\n");
+				}
+				else
+				{
+					ConPrint(L"Err saving to cfg\n");
+				}
 				///UpdateBountyTarget(wscDestroyedName, BTId);
 				
 				//Print Friendly Wide String TargetInfo
