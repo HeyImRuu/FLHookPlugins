@@ -155,7 +155,7 @@ bool deleteBountyCfg(BountyTargetInfo BTI)
 	ifstream tmpCfg(File_FLHook_tmp);
 	vector<string> file;
 	string temp;//buffer for getline()
-	if (tmpCfg.is_open())
+	if (!tmpCfg.is_open())
 	{
 		return false;
 	}
@@ -185,18 +185,22 @@ bool deleteBountyCfg(BountyTargetInfo BTI)
 	}
 
 
-	string item = "hit = " + BTI.Char + "," + BTI.Cash + "," + BTI.xTimes + "," + BTI.issuer + "," + sSafe + "," + sActive + BTI.lastIssuer;//find this
+	string item = "hit = " + BTI.Char + "," + BTI.Cash + "," + BTI.xTimes + "," + BTI.issuer + "," + sSafe + "," + sActive + "," + BTI.lastIssuer;//find this
 	for (int i = 0; i < (int)file.size(); ++i)
 	{
+		ConPrint(L"Debug: searching for " + stows(item));
 		if (file[i].substr(0, item.length()) == item)
 		{
-
 			file.erase(file.begin() + i);
+			ConPrint(L"Debug: deleted line " + stows(item) + L" at i = " + stows(itos(i)) + L"\n");
 			i = 0; // Reset search
 		}
 	}
 	ofstream out(File_FLHook_tmp, ios::out | ios::trunc);
-
+	if (!out.is_open())
+	{
+		return false;
+	}
 	for (vector<string>::const_iterator i = file.begin(); i != file.end(); ++i)
 	{
 		out << *i << endl;
@@ -485,9 +489,6 @@ bool UserCmd_BountyAddTo(uint iClientID, const wstring &wscCmd, const wstring &w
 		return true;
 	}
 	HkAddCash((wchar_t*)Players.GetActiveCharacterName(iClientID), 0 - (stoi(wscCash) * stoi(BTIat.xTimes)));
-	BTIat.Cash = itos(stoi(BTIat.Cash) + stoi(wscCash));//update cash bounty
-	PrintUserCmdText(iClientID, L"Uploading to Neural Net...");
-	mapBountyTargets[ToLower(wscName)] = BTIat;
 	if (deleteBountyCfg(BTIat))
 	{
 		ConPrint(L"bounty removed from cfg\n");
@@ -496,6 +497,9 @@ bool UserCmd_BountyAddTo(uint iClientID, const wstring &wscCmd, const wstring &w
 	{
 		ConPrint(L"Err removing from cfg\n");
 	}
+	BTIat.Cash = itos(stoi(BTIat.Cash) + stoi(wscCash));//update cash bounty
+	PrintUserCmdText(iClientID, L"Uploading to Neural Net...");
+	mapBountyTargets[ToLower(wscName)] = BTIat;
 	if (appendBountyCfg(BTIat))
 	{
 		ConPrint(L"cfg saved\n");
@@ -703,7 +707,7 @@ EXPORT PLUGIN_INFO* Get_PluginInfo()
 {
 	PLUGIN_INFO* p_PI = new PLUGIN_INFO();
 	p_PI->sName = "BountyTracker by RamRawR";
-	p_PI->sShortName = "bounty";
+	p_PI->sShortName = "bountytracker";
 	p_PI->bMayPause = true;
 	p_PI->bMayUnload = true;
 	p_PI->ePluginReturnCode = &returncode;
