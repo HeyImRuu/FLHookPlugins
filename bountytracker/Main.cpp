@@ -77,9 +77,9 @@ struct BountyTargetInfo {
 	string Cash;
 	string xTimes;
 	string issuer;
-	bool safe;
 	bool active;
 	string lastIssuer;
+	string lastTime;
 };
 BountyTargetInfo BTI;
 static map<wstring, BountyTargetInfo> mapBountyTargets;
@@ -128,9 +128,9 @@ void LoadSettings()
 						BTI.Cash = ini.get_value_string(1);
 						BTI.xTimes = ini.get_value_string(2);
 						BTI.issuer = ToLower(ini.get_value_string(3));
-						BTI.safe = ini.get_value_bool(4);
-						BTI.active = ini.get_value_bool(5);
-						BTI.lastIssuer = ToLower(ini.get_value_string(6));
+						BTI.active = ini.get_value_bool(4);
+						BTI.lastIssuer = ToLower(ini.get_value_string(5));
+						BTI.lastTime = ini.get_value_string(6);
 						mapBountyTargets[theTargetName] = BTI;
 						++iLoaded;
 					}
@@ -167,14 +167,6 @@ bool deleteBountyCfg(BountyTargetInfo BTI)
 	// done reading file
 	tmpCfg.close();
 
-	if (BTI.safe)
-	{
-		sSafe = "true";
-	}
-	if (!BTI.safe)
-	{
-		sSafe = "false";
-	}
 	if (BTI.active)
 	{
 		sActive = "true";
@@ -185,14 +177,14 @@ bool deleteBountyCfg(BountyTargetInfo BTI)
 	}
 
 
-	string item = "hit = " + BTI.Char + "," + BTI.Cash + "," + BTI.xTimes + "," + BTI.issuer + "," + sSafe + "," + sActive + "," + BTI.lastIssuer;//find this
+	string item = "hit = " + BTI.Char + "," + BTI.Cash + "," + BTI.xTimes + "," + BTI.issuer + "," + sActive + "," + BTI.lastIssuer + "," + BTI.lastTime;//find this
 	for (int i = 0; i < (int)file.size(); ++i)
 	{
-		ConPrint(L"Debug: searching for " + stows(item));
+		///ConPrint(L"Debug: searching for " + stows(item));
 		if (file[i].substr(0, item.length()) == item)
 		{
 			file.erase(file.begin() + i);
-			ConPrint(L"Debug: deleted line " + stows(item) + L" at i = " + stows(itos(i)) + L"\n");
+			///ConPrint(L"Debug: deleted line " + stows(item) + L" at i = " + stows(itos(i)) + L"\n");
 			i = 0; // Reset search
 		}
 	}
@@ -209,7 +201,7 @@ bool deleteBountyCfg(BountyTargetInfo BTI)
 
 	return true;
 }
-//only used when server is able to handle the file write lag
+//only used when server is able to handle the file write lag - we'll see how much lag this induces
 bool appendBountyCfg(BountyTargetInfo BTI)
 {
 	string sSafe;
@@ -221,14 +213,6 @@ bool appendBountyCfg(BountyTargetInfo BTI)
 	{
 		return false;
 	}
-	if (BTI.safe)
-	{
-		sSafe = "true";
-	}
-	if (!BTI.safe)
-	{
-		sSafe = "false";
-	}
 	if (BTI.active)
 	{
 		sActive = "true";
@@ -237,7 +221,7 @@ bool appendBountyCfg(BountyTargetInfo BTI)
 	{
 		sActive = "false";
 	}
-	tmpCfg << endl << "hit = " << BTI.Char << "," << BTI.Cash << "," << BTI.xTimes << "," << BTI.issuer << "," << sSafe << "," << sActive << "," << BTI.lastIssuer << endl;
+	tmpCfg << endl << "hit = " << BTI.Char << "," << BTI.Cash << "," << BTI.xTimes << "," << BTI.issuer << "," << sActive << "," << BTI.lastIssuer << "," << BTI.lastTime;
 	tmpCfg.close();
 	return true;
 }
@@ -291,6 +275,7 @@ bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wsc
 		PrintUserCmdText(iClientID, L"BountyTracker is disabled.");
 		return true;
 	}
+	
 
 	// Get the parameters from the user command.
 	wstring wscName = GetParam(wscParam, L' ', 0);
@@ -300,7 +285,14 @@ bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wsc
 	wscCash = ReplaceStr(wscCash, L",", L"");
 	wscCash = ReplaceStr(wscCash, L"$", L"");
 	wscCash = ReplaceStr(wscCash, L"e6", L"000000");//because scientific notation is cool
-
+	int iOnlineSecs;
+	HkGetOnLineTime((wchar_t*)Players.GetActiveCharacterName(iClientID), iOnlineSecs);
+	if (iOnlineSecs < 7200)// 7200 = 2hrs
+	{
+		PrintUserCmdText(iClientID, L"ERR Char is too new");
+		return true;
+	}
+	
 	//you are not allowed to create a bounty. ERR rank too low (note, find out what a good rank should be to have access to this. no fresh chars can
 	//create bounties. this way we can protect against creating random fresh accs, tranferring cash, and setting copious amounts of bounties.
 	if (wscName == L"")
@@ -318,11 +310,16 @@ bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wsc
 		PrintUserCmdText(iClientID, L"ERR Player already has an active bounty\n");
 		return true;
 	}
-	if (mapBountyTargets[ToLower(wscName)].safe)
+	if (mapBountyTargets[ToLower(wscName)].lastTime != "")
 	{
-		PrintUserCmdText(iClientID, L"ERR Player is protected\n");
-		return true;
+		if ((stoi(mapBountyTargets[ToLower(wscName)].lastTime) + 3600) > (int)time(0))
+			{
+				PrintUserCmdText(iClientID, L"ERR Player is protected\n");
+				PrintUserCmdText(iClientID, stows(itos((stoi(mapBountyTargets[ToLower(wscName)].lastTime) + 3600) - (int)time(0))) + L"'s remaining");
+				return true;
+			}
 	}
+	
 	if (iClientID == HkGetClientIdFromCharname(stows(mapBountyTargets[ToLower(wscName)].lastIssuer)))//not too sure about this
 	{
 		PrintUserCmdText(iClientID, L"ERR You cannot double a bounty on this player\n");
@@ -356,7 +353,8 @@ bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wsc
 	BTIa.issuer = ToLower(wstos((wchar_t*)Players.GetActiveCharacterName(iClientID)));
 	BTIa.lastIssuer = BTIa.issuer;
 	BTIa.active = true;
-	///BTIa.safe = false;
+	BTIa.lastTime = "";
+
 	//check user has enough money for the bounty
 	int iCash;
 	HkGetCash(stows(BTIa.issuer), iCash);
@@ -491,22 +489,22 @@ bool UserCmd_BountyAddTo(uint iClientID, const wstring &wscCmd, const wstring &w
 	HkAddCash((wchar_t*)Players.GetActiveCharacterName(iClientID), 0 - (stoi(wscCash) * stoi(BTIat.xTimes)));
 	if (deleteBountyCfg(BTIat))
 	{
-		ConPrint(L"bounty removed from cfg\n");
+		//ConPrint(L"bounty removed from cfg\n");
 	}
 	else
 	{
-		ConPrint(L"Err removing from cfg\n");
+		ConPrint(L"BOUNTYTRACKER: Err removing from cfg. is server admin?\n");
 	}
 	BTIat.Cash = itos(stoi(BTIat.Cash) + stoi(wscCash));//update cash bounty
 	PrintUserCmdText(iClientID, L"Uploading to Neural Net...");
 	mapBountyTargets[ToLower(wscName)] = BTIat;
 	if (appendBountyCfg(BTIat))
 	{
-		ConPrint(L"cfg saved\n");
+		//ConPrint(L"cfg saved\n");
 	}
 	else
 	{
-		ConPrint(L"Err saving to cfg\n");
+		ConPrint(L"BOUNTYTRACKER: Err saving to cfg. is serevr admin?\n");
 	}
 	PrintUserCmdText(iClientID, L"OK");
 	return true;
@@ -529,11 +527,11 @@ void __stdcall ShipDestroyed(DamageList *_dmg, DWORD *ecx, uint iKill)
 			{
 				if (deleteBountyCfg(BTId))
 				{
-					ConPrint(L"bounty removed from cfg\n");
+					///ConPrint(L"bounty removed from cfg\n");
 				}
 				else
 				{
-					ConPrint(L"Err removing from cfg\n");
+					ConPrint(L"BOUNTYTRACKER: Err removing from cfg. is server admin?\n");
 				}
 				// calls the killer the last one to damage the victim
 				DamageList dmg;
@@ -569,22 +567,21 @@ void __stdcall ShipDestroyed(DamageList *_dmg, DWORD *ecx, uint iKill)
 					//bounty has been fullfilled, clear all dataa
 					BTId.active = false;
 					BTId.Cash = "0";
-					BTId.safe = true;
 					BTId.xTimes = "0";
 					BTId.issuer = "n/a";
+					BTId.lastTime = itos((int)time(0));
 				}
 
 				//upload into neural net
 				mapBountyTargets[wscDestroyedName] = BTId;
 				if (appendBountyCfg(BTId))
 				{
-					ConPrint(L"cfg saved\n");
+					///ConPrint(L"cfg saved\n");
 				}
 				else
 				{
-					ConPrint(L"Err saving to cfg\n");
+					ConPrint(L"BOUNTYTRACKER: Err saving to cfg. is serevr admin?\n");
 				}
-				///UpdateBountyTarget(wscDestroyedName, BTId);
 				
 				//Print Friendly Wide String TargetInfo
 				wstring PFwsTargetInfo;
