@@ -36,14 +36,17 @@
 
 #include "../hookext_plugin/hookext_exports.h"
 
-static int set_iPluginDebug = 0;// 0 = no debug | 1 = all debug
+static int set_iPluginDebug = 1;// 0 = no debug | 1 = all debug
 static string MSG_LOG = "-mail.ini";
 static const int MAX_MAIL_MSGS = 40;
 static const int MAX_BOUNTY_SAVES = 200;
 bool set_bLocalTime = false;
 bool bPluginEnabled = true;
+uint iCleanInterval = 1800;//30 mins in s // how often to clean old bounties
+uint iLastUpCall = (uint)time(0);//last time bounties were cleaned
+uint iBountyAge = 604800;//how long a bounty will remain active (in s) //default 1 week
 
-/// A return code to indicate to FLHook if we want the hook processing to continue.
+							/// A return code to indicate to FLHook if we want the hook processing to continue.
 PLUGIN_RETURNCODE returncode;
 
 void LoadSettings();
@@ -71,7 +74,6 @@ EXPORT PLUGIN_RETURNCODE Get_PluginReturnCode()
 {
 	return returncode;
 }
-
 struct BountyTargetInfo {
 	string Char;
 	string Cash;
@@ -80,13 +82,22 @@ struct BountyTargetInfo {
 	bool active;
 	string lastIssuer;
 	string lastTime;
+	string issueTime;
 };
 BountyTargetInfo BTI;
 static map<wstring, BountyTargetInfo> mapBountyTargets;
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Loading Settings
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
+//hey look a bug!
+void conDebug(wstring wscText)
+{
+	if (set_iPluginDebug)
+	{
+		ConPrint(L"[BOUNTYTRACKER] " + wscText);
+		ConPrint(L"\n");
+	}
+}
 void LoadSettings()
 {
 	returncode = DEFAULT_RETURNCODE;
@@ -108,11 +119,22 @@ void LoadSettings()
 					{
 						bPluginEnabled = ini.get_value_bool(0);
 					}
+					if (ini.is_value("CleanInterval"))
+					{
+						iCleanInterval = ini.get_value_int(0);
+						conDebug(L"cleaning interval set to " + stows(itos(iCleanInterval)));
+					}
+					if (ini.is_value("BountyAge"))
+					{
+						iBountyAge = ini.get_value_int(0);
+						conDebug(L"bounty age set to " + stows(itos(iBountyAge)));
+						
+					}
 				}
 			}
 		}ini.close();
 	}
-	if(ini.open(File_FLHook_bounties.c_str(), false))
+	if (ini.open(File_FLHook_bounties.c_str(), false))
 	{
 		while (ini.read_header())
 		{
@@ -131,6 +153,7 @@ void LoadSettings()
 						BTI.active = ini.get_value_bool(4);
 						BTI.lastIssuer = ToLower(ini.get_value_string(5));
 						BTI.lastTime = ini.get_value_string(6);
+						BTI.issueTime = ini.get_value_string(7);
 						mapBountyTargets[theTargetName] = BTI;
 						++iLoaded;
 					}
@@ -146,12 +169,13 @@ void LoadSettings()
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Functions
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//deletes a bounty from the cfg
+//deletes a bounty from the cfg - problems
 bool deleteBountyCfg(BountyTargetInfo BTI)
 {
-	string sSafe;
+	conDebug(L"attempting to delete " + stows(BTI.Char));
 	string sActive;
 	string File_FLHook_tmp = "..\\exe\\flhook_plugins\\bountytracker.bounties.cfg";
+	//string File_FLHook_tmp = "C:/Program Files (x86)/Microsoft Games/Discovery Freelancer 4.88.1/EXE/flhook_plugins/bountytracker.bounties.cfg";
 	ifstream tmpCfg(File_FLHook_tmp);
 	vector<string> file;
 	string temp;//buffer for getline()
@@ -159,10 +183,12 @@ bool deleteBountyCfg(BountyTargetInfo BTI)
 	{
 		return false;
 	}
-	while (!tmpCfg.eof())
+	while (getline(tmpCfg, temp))
 	{
-		getline(tmpCfg, temp);
-		file.push_back(temp);
+		if (!temp.empty())
+		{
+			file.push_back(temp);
+		}
 	}
 	// done reading file
 	tmpCfg.close();
@@ -176,35 +202,54 @@ bool deleteBountyCfg(BountyTargetInfo BTI)
 		sActive = "false";
 	}
 
-
-	string item = "hit = " + BTI.Char + "," + BTI.Cash + "," + BTI.xTimes + "," + BTI.issuer + "," + sActive + "," + BTI.lastIssuer + "," + BTI.lastTime;//find this
+	string item = "hit = " + BTI.Char + "," + BTI.Cash + "," + BTI.xTimes + "," + BTI.issuer + "," + sActive + "," + BTI.lastIssuer + "," + BTI.lastTime + "," + BTI.issueTime;//find this
+	conDebug(L"searching for " + stows(item));
 	for (int i = 0; i < (int)file.size(); ++i)
 	{
 		///ConPrint(L"Debug: searching for " + stows(item));
 		if (file[i].substr(0, item.length()) == item)
 		{
 			file.erase(file.begin() + i);
-			///ConPrint(L"Debug: deleted line " + stows(item) + L" at i = " + stows(itos(i)) + L"\n");
+			conDebug(L"Debug: deleted line " + stows(item) + L" at i = " + stows(itos(i)));
 			i = 0; // Reset search
 		}
 	}
-	ofstream out(File_FLHook_tmp, ios::out | ios::trunc);
+
+	if (remove(File_FLHook_tmp.c_str()) != 0)
+	{
+		conDebug(L"ERROR deleting");
+		return false;
+	}//delete file
+
+	ofstream out;
+	out.open(File_FLHook_tmp.c_str(), ios::out | ios::trunc);//y u no open? test for lies
+
 	if (!out.is_open())
 	{
+		conDebug(L"out file not open");
 		return false;
 	}
 	for (vector<string>::const_iterator i = file.begin(); i != file.end(); ++i)
 	{
 		out << *i << endl;
+		conDebug(stows(*i));
+		conDebug(L"outputted to file");
 	}
 	out.close();
 
+	//delete the virtual bounty now
+	BTI.active = false;
+	BTI.Cash = "0";
+	BTI.xTimes = "0";
+	BTI.issuer = "na";
+	BTI.lastTime = itos((int)time(0));
+	BTI.issueTime = "0";
+	mapBountyTargets[stows(BTI.Char)] = BTI;
+	conDebug(L"deleted virtual bounty" + stows(BTI.Char));
 	return true;
 }
-//only used when server is able to handle the file write lag - we'll see how much lag this induces
 bool appendBountyCfg(BountyTargetInfo BTI)
 {
-	string sSafe;
 	string sActive;
 	string File_FLHook_tmp = "..\\exe\\flhook_plugins\\bountytracker.bounties.cfg";
 	ofstream tmpCfg;
@@ -221,7 +266,7 @@ bool appendBountyCfg(BountyTargetInfo BTI)
 	{
 		sActive = "false";
 	}
-	tmpCfg << endl << "hit = " << BTI.Char << "," << BTI.Cash << "," << BTI.xTimes << "," << BTI.issuer << "," << sActive << "," << BTI.lastIssuer << "," << BTI.lastTime;
+	tmpCfg << endl << "hit = " << BTI.Char << "," << BTI.Cash << "," << BTI.xTimes << "," << BTI.issuer << "," << sActive << "," << BTI.lastIssuer << "," << BTI.lastTime << "," << BTI.issueTime;
 	tmpCfg.close();
 	return true;
 }
@@ -275,7 +320,7 @@ bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wsc
 		PrintUserCmdText(iClientID, L"BountyTracker is disabled.");
 		return true;
 	}
-	
+
 
 	// Get the parameters from the user command.
 	wstring wscName = GetParam(wscParam, L' ', 0);
@@ -292,7 +337,7 @@ bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wsc
 		PrintUserCmdText(iClientID, L"ERR Char is too new");
 		return true;
 	}
-	
+
 	//you are not allowed to create a bounty. ERR rank too low (note, find out what a good rank should be to have access to this. no fresh chars can
 	//create bounties. this way we can protect against creating random fresh accs, tranferring cash, and setting copious amounts of bounties.
 	if (wscName == L"")
@@ -313,13 +358,13 @@ bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wsc
 	if (mapBountyTargets[ToLower(wscName)].lastTime != "")
 	{
 		if ((stoi(mapBountyTargets[ToLower(wscName)].lastTime) + 3600) > (int)time(0))
-			{
-				PrintUserCmdText(iClientID, L"ERR Player is protected\n");
-				PrintUserCmdText(iClientID, stows(itos((stoi(mapBountyTargets[ToLower(wscName)].lastTime) + 3600) - (int)time(0))) + L"'s remaining");
-				return true;
-			}
+		{
+			PrintUserCmdText(iClientID, L"ERR Player is protected\n");
+			PrintUserCmdText(iClientID, stows(itos((stoi(mapBountyTargets[ToLower(wscName)].lastTime) + 3600) - (int)time(0))) + L"'s remaining");
+			return true;
+		}
 	}
-	
+
 	if (iClientID == HkGetClientIdFromCharname(stows(mapBountyTargets[ToLower(wscName)].lastIssuer)))//not too sure about this
 	{
 		PrintUserCmdText(iClientID, L"ERR You cannot double a bounty on this player\n");
@@ -354,6 +399,7 @@ bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wsc
 	BTIa.lastIssuer = BTIa.issuer;
 	BTIa.active = true;
 	BTIa.lastTime = "";
+	BTIa.issueTime = itos((int)time(0));
 
 	//check user has enough money for the bounty
 	int iCash;
@@ -369,13 +415,15 @@ bool UserCmd_BountyAdd(uint iClientID, const wstring &wscCmd, const wstring &wsc
 
 	wstring PFwsTargetInfo;
 	PFwsTargetInfo = L"Target: ";
-	PFwsTargetInfo += wscName;
+	PFwsTargetInfo += ToLower(wscName);
 	PFwsTargetInfo += L" Worth: ";
 	PFwsTargetInfo += stows(BTIa.Cash);
 	PFwsTargetInfo += L" Contracts Left: ";
 	PFwsTargetInfo += stows(BTIa.xTimes);
 	PFwsTargetInfo += L" Issuer: ";
 	PFwsTargetInfo += stows(BTIa.issuer);
+	PFwsTargetInfo += L" Issued: ";
+	PFwsTargetInfo += stows(BTIa.issueTime);
 	PrintUserCmdText(iClientID, PFwsTargetInfo);
 
 	if (appendBountyCfg(BTIa))
@@ -422,6 +470,8 @@ bool UserCmd_BountyView(uint iClientID, const wstring &wscCmd, const wstring &ws
 	PFwsTargetInfo += stows(BTIv.xTimes);
 	PFwsTargetInfo += L" Issuer: ";
 	PFwsTargetInfo += stows(BTIv.issuer);
+	PFwsTargetInfo += L" Issued: ";
+	PFwsTargetInfo += stows(BTIv.issueTime);
 	PrintUserCmdText(iClientID, PFwsTargetInfo);
 	PrintUserCmdText(iClientID, L"OK");
 	return true;
@@ -570,6 +620,7 @@ void __stdcall ShipDestroyed(DamageList *_dmg, DWORD *ecx, uint iKill)
 					BTId.xTimes = "0";
 					BTId.issuer = "n/a";
 					BTId.lastTime = itos((int)time(0));
+					BTId.issueTime = "0";
 				}
 
 				//upload into neural net
@@ -582,17 +633,19 @@ void __stdcall ShipDestroyed(DamageList *_dmg, DWORD *ecx, uint iKill)
 				{
 					ConPrint(L"BOUNTYTRACKER: Err saving to cfg. is serevr admin?\n");
 				}
-				
+
 				//Print Friendly Wide String TargetInfo
 				wstring PFwsTargetInfo;
 				PFwsTargetInfo = L"Target: ";
-				PFwsTargetInfo += wscDestroyedName;
+				PFwsTargetInfo += ToLower(wscDestroyedName);
 				PFwsTargetInfo += L" Worth: ";
 				PFwsTargetInfo += stows(BTId.Cash);
 				PFwsTargetInfo += L" Contracts Left: ";
 				PFwsTargetInfo += stows(BTId.xTimes);
 				PFwsTargetInfo += L" Issuer: ";
 				PFwsTargetInfo += stows(BTId.issuer);
+				PFwsTargetInfo += L" Issued at: ";
+				PFwsTargetInfo += stows(BTId.issueTime);
 
 				//add bounty cash
 				HkAddCash(wscKillerName, stoi(BTId.Cash));
@@ -619,6 +672,7 @@ void __stdcall ShipDestroyed(DamageList *_dmg, DWORD *ecx, uint iKill)
 	}
 	return;
 }
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Actual Code
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -628,7 +682,67 @@ void ClearClientInfo(uint iClientID)
 {
 	returncode = DEFAULT_RETURNCODE;
 }
+/** Clean up old bounties **/
+void CleanUpBounties()
+{
+	conDebug(L"attempting to clean up bounties");
+	string File_FLHook_bounties = "..\\exe\\flhook_plugins\\bountytracker.bounties.cfg";
 
+	INI_Reader ini;
+		if (ini.open(File_FLHook_bounties.c_str(), false))
+		{
+			while (ini.read_header())
+			{
+				if (ini.is_header("bounty"))
+				{
+					while (ini.read_value())
+					{
+						if (ini.is_value("hit"))
+						{
+							wstring wscTargetName = stows(ini.get_value_string(0));
+							//if bounty has expired
+							if ((uint)time(0) - stoi(mapBountyTargets[wscTargetName].issueTime) > iBountyAge)
+							{
+								//find bounty
+								BountyTargetInfo BTIc = mapBountyTargets[wscTargetName];
+								//refund remaining credits to issuer
+								HkAddCash(stows(BTIc.issuer), (stoi(BTIc.Cash) * stoi(BTIc.xTimes)));//issuer needs to be online(?)
+								//notify issuer their bounty has been refunded
+
+								//delete bounty
+								deleteBountyCfg(BTIc);
+							}
+							//if target has changed name
+							CAccount *caTargetAcc = HkGetAccountByCharname(wscTargetName);
+							int iTargetAcc = stoi(HkGetAccountID(caTargetAcc));
+							if (iTargetAcc == -1)
+							{
+								//find bounty
+								BountyTargetInfo BTIc = mapBountyTargets[wscTargetName];
+								//refund remaining credits to issuer
+								HkAddCash(stows(BTIc.issuer), (stoi(BTIc.Cash) * stoi(BTIc.xTimes)));//issuer needs to be online(?)
+								//notify issuer their bounty has been refunded
+
+								//delete bounty
+								deleteBountyCfg(BTIc);
+							}
+						}
+					}
+				}
+			}
+			ini.close();
+		}
+}
+void __stdcall Update()//called on each tick (?) only cleans if specified interval has passed
+{
+	returncode = DEFAULT_RETURNCODE;
+	if (((uint)time(0) - iLastUpCall) >= iCleanInterval)
+	{
+		conDebug(L"time math: " + stows(itos((uint)time(0))) + L" - " + stows(itos(iLastUpCall)) + L" > " + stows(itos(iCleanInterval)));
+		CleanUpBounties();
+		iLastUpCall = (uint)time(0);
+	}
+}
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Client command processing
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -713,6 +827,8 @@ EXPORT PLUGIN_INFO* Get_PluginInfo()
 	p_PI->lstHooks.push_back(PLUGIN_HOOKINFO((FARPROC*)&ClearClientInfo, PLUGIN_ClearClientInfo, 0));
 	p_PI->lstHooks.push_back(PLUGIN_HOOKINFO((FARPROC*)&UserCmd_Process, PLUGIN_UserCmd_Process, 0));
 	p_PI->lstHooks.push_back(PLUGIN_HOOKINFO((FARPROC*)&ShipDestroyed, PLUGIN_ShipDestroyed, 0));
+	p_PI->lstHooks.push_back(PLUGIN_HOOKINFO((FARPROC*)&Update, PLUGIN_HkIServerImpl_Update, 0));
 
 	return p_PI;
 }
+
