@@ -103,7 +103,7 @@ void LoadSettings()
 	returncode = DEFAULT_RETURNCODE;
 
 	string File_FLHook = "..\\exe\\flhook_plugins\\bountytracker.cfg";
-	string File_FLHook_bounties = "..\\exe\\flhook_plugins\\bountytracker.bounties.cfg";
+	string File_FLHook_bounties = "..\\exe\\flhook_plugins\\bountytrackerbounties.cfg";
 	int iLoaded = 0;
 
 	INI_Reader ini;
@@ -169,30 +169,97 @@ void LoadSettings()
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Functions
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//deletes a bounty from the cfg - problems
-bool deleteBountyCfg(BountyTargetInfo BTI)
+
+
+////////////////////////////////////////////////////////////////////////////
+
+vector<string> Currentvsfile;
+
+//load the contents of a file, line by line, into a global vector<string>
+bool loadfile(string sfile)
 {
-	conDebug(L"attempting to delete " + stows(BTI.Char));
-	string sActive;
-	string File_FLHook_tmp = "..\\exe\\flhook_plugins\\bountytracker.bounties.cfg";
-	//string File_FLHook_tmp = "C:/Program Files (x86)/Microsoft Games/Discovery Freelancer 4.88.1/EXE/flhook_plugins/bountytracker.bounties.cfg";
-	ifstream tmpCfg(File_FLHook_tmp);
-	vector<string> file;
-	string temp;//buffer for getline()
-	if (!tmpCfg.is_open())
+	ifstream tmpCfg(sfile);
+	string stemp;//buffer for getline()
+	if (tmpCfg.fail())
 	{
 		return false;
 	}
-	while (getline(tmpCfg, temp))
+	while (getline(tmpCfg, stemp))
 	{
-		if (!temp.empty())
+		if (!stemp.empty())
 		{
-			file.push_back(temp);
+			Currentvsfile.push_back(stemp);
 		}
 	}
 	// done reading file
 	tmpCfg.close();
+	return true;
+}
+//remove a matching data line from a vector<string>
+bool RemoveLinevsFile(string data, vector<string> vsFile)
+{
+	for (int i = 0; i < (int)vsFile.size(); ++i)
+	{
+		if (vsFile[i].substr(0, data.length()) == data)
+		{
+			vsFile.erase(vsFile.begin() + i);
+			i = 0; // Reset search
+		}
+	}
+	return true;
+}
+//replace the contents of a file with a vector<string>
+bool ReplaceFileContents(const string file, vector<string> vsFile)
+{
 
+
+
+
+	/*fstream out;
+	out.open(file, ios::out | ios::trunc);
+	if (out.fail())
+	{
+		conDebug(L"i'm the annoying part of this code o7");
+		return false;
+	}*/
+	//things
+	stringstream stream;
+	for (vector<string>::const_iterator i = vsFile.begin(); i != vsFile.end(); ++i)
+	{
+		//out << *i << endl;
+		stream << *i << endl;
+	}
+
+
+
+
+	FILE *filebounty = fopen(file.c_str(), "w");
+
+	if (filebounty)
+	{
+		fprintf(filebounty, stream.str().c_str());
+		fclose(filebounty);
+	}
+
+
+
+
+
+
+
+
+
+	//out.close();
+	return true;
+}
+
+/////////////////////////////////////////////////////////////////////////
+bool deleteBountyCfg(BountyTargetInfo BTI)
+{
+	string sActive;
+	//load file
+	loadfile("..\\exe\\flhook_plugins\\bountytrackerbounties.cfg");
+	//remove strings
 	if (BTI.active)
 	{
 		sActive = "true";
@@ -201,57 +268,21 @@ bool deleteBountyCfg(BountyTargetInfo BTI)
 	{
 		sActive = "false";
 	}
-
-	string item = "hit = " + BTI.Char + "," + BTI.Cash + "," + BTI.xTimes + "," + BTI.issuer + "," + sActive + "," + BTI.lastIssuer + "," + BTI.lastTime + "," + BTI.issueTime;//find this
-	conDebug(L"searching for " + stows(item));
-	for (int i = 0; i < (int)file.size(); ++i)
-	{
-		///ConPrint(L"Debug: searching for " + stows(item));
-		if (file[i].substr(0, item.length()) == item)
-		{
-			file.erase(file.begin() + i);
-			conDebug(L"Debug: deleted line " + stows(item) + L" at i = " + stows(itos(i)));
-			i = 0; // Reset search
-		}
-	}
-
-	if (remove(File_FLHook_tmp.c_str()) != 0)
-	{
-		conDebug(L"ERROR deleting");
-		return false;
-	}//delete file
-
-	ofstream out;
-	out.open(File_FLHook_tmp.c_str(), ios::out | ios::trunc);//y u no open? test for lies
-
-	if (!out.is_open())
-	{
-		conDebug(L"out file not open");
-		return false;
-	}
-	for (vector<string>::const_iterator i = file.begin(); i != file.end(); ++i)
-	{
-		out << *i << endl;
-		conDebug(stows(*i));
-		conDebug(L"outputted to file");
-	}
-	out.close();
-
-	//delete the virtual bounty now
-	BTI.active = false;
-	BTI.Cash = "0";
-	BTI.xTimes = "0";
-	BTI.issuer = "na";
-	BTI.lastTime = itos((int)time(0));
-	BTI.issueTime = "0";
-	mapBountyTargets[stows(BTI.Char)] = BTI;
-	conDebug(L"deleted virtual bounty" + stows(BTI.Char));
+	string item = "hit = " + BTI.Char + "," + BTI.Cash + "," + BTI.xTimes + "," + BTI.issuer + "," + sActive + "," + BTI.lastIssuer + "," + BTI.lastTime + "," + BTI.issueTime + "\n";//find this
+	RemoveLinevsFile(item, Currentvsfile);
+	//repalce file
+	conDebug(L"replacing line " + stows(BTI.Char));
+	ReplaceFileContents("..\\exe\\flhook_plugins\\bountytrackerbounties.cfg", Currentvsfile);
 	return true;
 }
+
+
+/////////////////////////////////////////////////////////////////////////
+
 bool appendBountyCfg(BountyTargetInfo BTI)
 {
 	string sActive;
-	string File_FLHook_tmp = "..\\exe\\flhook_plugins\\bountytracker.bounties.cfg";
+	string File_FLHook_tmp = "..\\exe\\flhook_plugins\\bountytrackerbounties.cfg";
 	ofstream tmpCfg;
 	tmpCfg.open(File_FLHook_tmp, ios::out | ios::app);
 	if (!tmpCfg.is_open())
@@ -686,7 +717,7 @@ void ClearClientInfo(uint iClientID)
 void CleanUpBounties()
 {
 	conDebug(L"attempting to clean up bounties");
-	string File_FLHook_bounties = "..\\exe\\flhook_plugins\\bountytracker.bounties.cfg";
+	string File_FLHook_bounties = "..\\exe\\flhook_plugins\\bountytrackerbounties.cfg";
 
 	INI_Reader ini;
 		if (ini.open(File_FLHook_bounties.c_str(), false))
@@ -703,6 +734,7 @@ void CleanUpBounties()
 							//if bounty has expired
 							if ((uint)time(0) - stoi(mapBountyTargets[wscTargetName].issueTime) > iBountyAge)
 							{
+								conDebug(L"removing " + wscTargetName);
 								//find bounty
 								BountyTargetInfo BTIc = mapBountyTargets[wscTargetName];
 								//refund remaining credits to issuer
